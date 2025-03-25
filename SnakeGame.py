@@ -107,6 +107,39 @@ def write_arff_instance(game, action, next_score, filename="training_keyboard.ar
             f.write(ARFF_HEADER)
         f.write(print_line_data(game, action, next_score))
 
+# Wall & body safety check
+def is_safe_direction(game, direction):
+    next_x, next_y = game.snake_pos[0], game.snake_pos[1]
+    if direction == 'UP': next_y -= 10
+    elif direction == 'DOWN': next_y += 10
+    elif direction == 'LEFT': next_x -= 10
+    elif direction == 'RIGHT': next_x += 10
+
+    if next_x < 0 or next_x >= FRAME_SIZE_X or next_y < 0 or next_y >= FRAME_SIZE_Y:
+        return False
+    if [next_x, next_y] in game.snake_body:
+        return False
+    return True
+
+# Prioritize direction toward food that's also safe
+def best_direction_toward_food(game):
+    directions = ['UP', 'DOWN', 'LEFT', 'RIGHT']
+    best_dir = None
+    min_dist = float('inf')
+    for d in directions:
+        if not is_safe_direction(game, d):
+            continue
+        nx, ny = game.snake_pos[0], game.snake_pos[1]
+        if d == 'UP': ny -= 10
+        elif d == 'DOWN': ny += 10
+        elif d == 'LEFT': nx -= 10
+        elif d == 'RIGHT': nx += 10
+        dist = abs(nx - game.food_pos[0]) + abs(ny - game.food_pos[1])
+        if dist < min_dist:
+            min_dist = dist
+            best_dir = d
+    return best_dir
+
 # Initialize pygame
 pygame.init()
 pygame.display.set_caption('Snake Eater - Machine Learning (UC3M)')
@@ -128,19 +161,35 @@ while True:
             sys.exit()
         game.direction = move_keyboard(game, event)
 
-    # Predict action using Weka (example model call)
     x = [
-    game.snake_pos[0],     # snake_head_x
-    game.snake_pos[1],     # snake_head_y
-    game.food_pos[0],      # food_x
-    game.food_pos[1],      # food_y
-    len(game.snake_body),  # snake_len
-    game.score,            # current_score
+        game.snake_pos[0],
+        game.snake_pos[1],
+        game.food_pos[0],
+        game.food_pos[1],
+        len(game.snake_body),
+        game.score
     ]
     predicted_action = weka.predict("./j48.model", x, "./training_keyboard_filtered.arff")
 
-    # Update snake position based on prediction
-    game.direction = predicted_action
+    if not is_safe_direction(game, predicted_action):
+        fallback = best_direction_toward_food(game)
+        if fallback:
+            predicted_action = fallback
+    else:
+        # Even if safe, check if best_direction_toward_food is better
+        toward_food = best_direction_toward_food(game)
+        if toward_food and toward_food != game.direction:
+            predicted_action = toward_food
+
+    if predicted_action == 'UP' and game.direction != 'DOWN':
+        game.direction = 'UP'
+    elif predicted_action == 'DOWN' and game.direction != 'UP':
+        game.direction = 'DOWN'
+    elif predicted_action == 'LEFT' and game.direction != 'RIGHT':
+        game.direction = 'LEFT'
+    elif predicted_action == 'RIGHT' and game.direction != 'LEFT':
+        game.direction = 'RIGHT'
+
     if game.direction == 'UP': game.snake_pos[1] -= 10
     if game.direction == 'DOWN': game.snake_pos[1] += 10
     if game.direction == 'LEFT': game.snake_pos[0] -= 10
@@ -158,13 +207,11 @@ while True:
         game.food_pos = [random.randrange(1, (FRAME_SIZE_X//10)) * 10, random.randrange(1, (FRAME_SIZE_Y//10)) * 10]
         game.food_spawn = True
 
-    # Draw everything
     game_window.fill(BLUE)
     for pos in game.snake_body:
         pygame.draw.rect(game_window, GREEN, pygame.Rect(pos[0], pos[1], 10, 10))
     pygame.draw.rect(game_window, RED, pygame.Rect(game.food_pos[0], game.food_pos[1], 10, 10))
 
-    # Check game over conditions
     if game.snake_pos[0] < 0 or game.snake_pos[0] >= FRAME_SIZE_X or game.snake_pos[1] < 0 or game.snake_pos[1] >= FRAME_SIZE_Y or game.snake_pos in game.snake_body[1:]:
         game_over(game)
 
